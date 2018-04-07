@@ -291,7 +291,7 @@ for name in ("sendto", "send", "recvfrom", "recv"):
         setattr(_BaseSocket, name, _makemethod(name))
 
 
-class socksocket(_BaseSocket):
+class socksocket:
     """socksocket([family[, type[, proto]]]) -> socket object
 
     Open a SOCKS enabled socket. The parameters are the same as
@@ -302,13 +302,9 @@ class socksocket(_BaseSocket):
 
     default_proxy = None
 
-    def __init__(self, family=socket.AF_INET, type=socket.SOCK_STREAM,
-                 proto=0, *args, **kwargs):
-        if type not in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
-            msg = "Socket type must be stream or datagram, not {!r}"
-            raise ValueError(msg.format(type))
-
-        super(socksocket, self).__init__(family, type, proto, *args, **kwargs)
+    def __init__(self, socket):
+        self._socket = socket
+        self.type = socket.type
         self._proxyconn = None  # TCP connection to keep UDP relay alive
 
         if self.default_proxy:
@@ -319,6 +315,16 @@ class socksocket(_BaseSocket):
         self.proxy_peername = None
 
         self._timeout = None
+
+    def makefile(self, *args, **kwargs):
+        return self._socket.makefile(*args, *kwargs)
+
+    def fileno(self):
+        fn = self._socket.fileno()
+        return fn
+
+    def sendall(self, data):
+        return self._socket.sendall(data)
 
     def _readall(self, file, count):
         """Receive EXACTLY the number of bytes requested from the file object.
@@ -337,7 +343,7 @@ class socksocket(_BaseSocket):
         try:
             # test if we're connected, if so apply timeout
             peer = self.get_proxy_peername()
-            super(socksocket, self).settimeout(self._timeout)
+            self._socket.settimeout(self._timeout)
         except socket.error:
             pass
 
@@ -390,7 +396,7 @@ class socksocket(_BaseSocket):
         if proxy_type != SOCKS5:
             msg = "UDP only supported by SOCKS5 proxy type"
             raise socket.error(EOPNOTSUPP, msg)
-        super(socksocket, self).bind(*pos, **kw)
+        self._socket.bind(*pos, **kw)
 
         # Need to specify actual local port because
         # some relays drop packets if a port of zero is specified.
@@ -409,13 +415,13 @@ class socksocket(_BaseSocket):
         # but some proxies return a private IP address (10.x.y.z)
         host, _ = proxy
         _, port = relay
-        super(socksocket, self).connect((host, port))
-        super(socksocket, self).settimeout(self._timeout)
+        self._socket.connect((host, port))
+        self._socket.settimeout(self._timeout)
         self.proxy_sockname = ("0.0.0.0", 0)  # Unknown
 
     def sendto(self, bytes, *args, **kwargs):
         if self.type != socket.SOCK_DGRAM:
-            return super(socksocket, self).sendto(bytes, *args, **kwargs)
+            return self._socket.sendto(bytes, *args, **kwargs)
         if not self._proxyconn:
             self.bind(("", 0))
 
@@ -429,7 +435,7 @@ class socksocket(_BaseSocket):
         header.write(STANDALONE)
         self._write_SOCKS5_address(address, header)
 
-        sent = super(socksocket, self).send(header.getvalue() + bytes, *flags,
+        sent = self._socket.send(header.getvalue() + bytes, *flags,
                                             **kwargs)
         return sent - header.tell()
 
@@ -437,15 +443,15 @@ class socksocket(_BaseSocket):
         if self.type == socket.SOCK_DGRAM:
             return self.sendto(bytes, flags, self.proxy_peername, **kwargs)
         else:
-            return super(socksocket, self).send(bytes, flags, **kwargs)
+            return self._socket.send(bytes, flags, **kwargs)
 
     def recvfrom(self, bufsize, flags=0):
         if self.type != socket.SOCK_DGRAM:
-            return super(socksocket, self).recvfrom(bufsize, flags)
+            return self._socket.recvfrom(bufsize, flags)
         if not self._proxyconn:
             self.bind(("", 0))
 
-        buf = BytesIO(super(socksocket, self).recv(bufsize + 1024, flags))
+        buf = BytesIO(self._socket.recv(bufsize + 1024, flags))
         buf.seek(2, SEEK_CUR)
         frag = buf.read(1)
         if ord(frag):
@@ -466,7 +472,7 @@ class socksocket(_BaseSocket):
     def close(self):
         if self._proxyconn:
             self._proxyconn.close()
-        return super(socksocket, self).close()
+        return self._socket.close()
 
     def get_proxy_sockname(self):
         """Returns the bound IP address and port number at the proxy."""
@@ -582,7 +588,7 @@ class socksocket(_BaseSocket):
             # Get the bound address/port
             bnd = self._read_SOCKS5_address(reader)
 
-            super(socksocket, self).settimeout(self._timeout)
+            self._socket.settimeout(self._timeout)
             return (resolved, bnd)
         finally:
             reader.close()
@@ -818,20 +824,20 @@ class socksocket(_BaseSocket):
 
         # We set the timeout here so that we don't hang in connection or during
         # negotiation.
-        super(socksocket, self).settimeout(self._timeout)
+        self._socket.settimeout(self._timeout)
 
         if proxy_type is None:
             # Treat like regular socket object
             self.proxy_peername = dest_pair
-            super(socksocket, self).settimeout(self._timeout)
-            super(socksocket, self).connect((dest_addr, dest_port))
+            self._socket.settimeout(self._timeout)
+            self._socket.connect((dest_addr, dest_port))
             return
 
         proxy_addr = self._proxy_addr()
 
         try:
             # Initial connection to proxy server.
-            super(socksocket, self).connect(proxy_addr)
+            self._socket.connect(proxy_addr)
 
         except socket.error as error:
             # Error while connecting to proxy
