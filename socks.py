@@ -234,7 +234,7 @@ def create_connection(dest_pair,
         family, socket_type, proto, canonname, sa = r
         sock = None
         try:
-            sock = socksocket(family, socket_type, proto)
+            sock = socksocket(socket.socket(family=family, type=socket_type, proto=proto))
 
             if socket_options:
                 for opt in socket_options:
@@ -244,8 +244,15 @@ def create_connection(dest_pair,
                 sock.settimeout(timeout)
 
             if proxy_type:
+                if proxy_username == 'chain':
+                    addr, port = proxy_password.split(':')
+                    sock.set_proxy(proxy_type, addr, int(port), proxy_rdns)
+                    proxy_username, proxy_password = None, None
+                    sock = socksocket(sock)
+
                 sock.set_proxy(proxy_type, proxy_addr, proxy_port, proxy_rdns,
                                proxy_username, proxy_password)
+
             if source_address:
                 sock.bind(source_address)
 
@@ -337,6 +344,23 @@ class socksocket:
                 raise GeneralProxyError("Connection closed unexpectedly")
             data += d
         return data
+
+    @property
+    def family(self):
+        return self._socket.family
+
+    @property
+    def proto(self):
+        return self._socket.proto
+
+    def detach(self, *args, **kwargs):
+        return self._socket.detach(*args, **kwargs)
+
+    def getsockopt(self, *args, **kwargs):
+        return self._socket.getsockopt(*args, **kwargs)
+
+    def setsockopt(self, *args, **kwargs):
+        return self._socket.setsockopt(*args, **kwargs)
 
     def settimeout(self, timeout):
         self._timeout = timeout
